@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
 
- :deps {metosin/malli {:mvn/version "0.2.1"}
+ :deps {com.gfredericks/test.chuck {:mvn/version "0.2.10"}
+        metosin/malli {:mvn/version "0.2.1"}
         org.clojure/clojure {:mvn/version "1.10.1"}}
 
  :aliases

@@ -1,9 +1,21 @@
 (ns patrulleros.clj-lox.scanner-test
   (:require [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.test.check.generators :as gen]
+            [com.gfredericks.test.chuck.clojure-test :refer [checking]]
+            [patrulleros.clj-lox.error :as error]
             [patrulleros.clj-lox.scanner :as sut]
-            [patrulleros.clj-lox.token :as token]))
+            [patrulleros.clj-lox.token :as token]
+            [patrulleros.clj-lox.util :as util]))
+
+(defn clear-errors-fixture [f]
+  (error/reset-error!)
+  (f))
+
+(use-fixtures :each clear-errors-fixture)
+
+(defmacro with-err-str [bindings & body])
 
 (defn gen-tokens
   ([choices]
@@ -120,10 +132,11 @@
                (sut/scan-tokens source))))))
 
   (testing "unterminated string should result in error"
-    (let [{:keys [tokens errors]} (sut/scan-tokens "\"this string doesn't terminate")]
-      (is (= tokens [(token/eof)]))
-      (let [message (get-in errors [0 :message])]
-        (is (str/starts-with? message "Unterminated string"))))))
+    (let [err (util/with-err-str
+                (let [tokens (sut/scan-tokens "\"this string doesn't terminate")]
+                  (is (= tokens [(token/eof)]))
+                  (is (error/error?))))]
+      (is (str/includes? (.toString err) "Unterminated string")))))
 
 (deftest numbers-test
   (testing "integers"
@@ -147,6 +160,23 @@
   (doseq [id ["a" "a_" "a1" "a_1" "abc" "_" "__" "_a" "_a_b_" "_123"]]
     (is (= [(token/create :IDENTIFIER id 1) (token/eof)]
            (sut/scan-tokens id)))))
+
+(def unrecognized-char-generator
+  (gen/such-that
+   #(and (not (sut/simple-single-char-tokens %))
+         (not (sut/without-equal-tokens %))
+         (not (sut/alphanumeric? % ))
+         (not (sut/whitespace-chars %))
+         (not (#{\newline \/ \"} %)))
+   gen/char))
+
+(deftest unrecognized-char-test
+  (checking "unrecognized char should result in error" 100
+    [c unrecognized-char-generator]
+    (let [err (util/with-err-str
+                (is (= [(token/eof)] (sut/scan-tokens (str c))))
+                (is (error/error?)))]
+      (is (str/includes? err "Unrecognized character")))))
 
 (deftest fib-test
   (is (= [(token/create :FUN "fun" 1)

@@ -1,5 +1,6 @@
 (ns patrulleros.clj-lox.scanner
-  (:require [patrulleros.clj-lox.token :as token]))
+  (:require [patrulleros.clj-lox.error :as error]
+            [patrulleros.clj-lox.token :as token]))
 
 (def whitespace-chars
   #{\space \tab \return})
@@ -48,19 +49,7 @@
 
 (defn create-context [source]
   {:source (seq source)
-   :line 1
-   :errors []})
-
-(defn create-error [{:keys [source line]} message & args]
-  {:source (apply str source)
-   :line line
-   :message (apply format message args)})
-
-(defn error-line [error]
-  (:line error))
-
-(defn error-message [error]
-  (:message error))
+   :line 1})
 
 (defn digit? [c]
   (<= (int \0) (int c) (int \9)))
@@ -84,22 +73,18 @@
  scan-newline
  scan-identifier
  scan-whitespace
-
- unrecognized-char)
+ scan-unrecognized-char!)
 
 (defn scan-tokens
   ([source]
    (scan-tokens [] (create-context source)))
-  ([tokens {:keys [source line errors] :as context}]
+  ([tokens {:keys [source line] :as context}]
    (if (seq source)
      (let [[token ctx] (scan-token context)]
        (if token
          (recur (conj tokens token) ctx)
          (recur tokens ctx)))
-     (let [tokens (conj tokens (token/eof line))]
-       (if (seq errors)
-         {:tokens tokens, :errors errors}
-         tokens)))))
+     (conj tokens (token/eof line)))))
 
 (defn scan-token [{:keys [source] :as context}]
   (let [c (first source)]
@@ -129,7 +114,7 @@
       (scan-whitespace context)
 
       :else
-      (unrecognized-char context))))
+      (scan-unrecognized-char! context))))
 
 (defn scan-simple [context]
   (let [c (-> context :source first)]
@@ -157,20 +142,21 @@
                (fn [source]
                  (drop-while #(not= % \newline) source)))])))
 
-(defn scan-string [context]
-  (let [[text src] (split-with #(not= % \") (-> context :source rest))]
+(defn scan-string [{:keys [source line] :as context}]
+  (let [[text src] (split-with #(not= % \") (rest source))
+        text (apply str text)
+        breaks (count (filter #(= % \newline) text))]
     (if (seq src)
-      (let [text (apply str text)
-            lexeme (str \" text \")
-            breaks (count (filter #(= % \newline) text))]
-        [(token/create :STRING lexeme text (:line context))
+      (let [lexeme (str \" text \")]
+        [(token/create :STRING lexeme text line)
          (-> context
              (assoc :source (rest src))
              (update :line + breaks))])
-      (let [error (create-error context "Unterminated string: %s." text)]
+      (do
+        (error/report-error! line (format "Unterminated string: %s." text))
         [nil (-> context
-                 (assoc :source (rest src))
-                 (update :errors conj error))]))))
+                 (assoc :source src)
+                 (update :line + breaks))]))))
 
 (defn scan-number [{:keys [line] :as context}]
   (let [[int-part src] (split-with digit? (:source context))]
@@ -203,8 +189,6 @@
 (defn scan-whitespace [context]
   [nil (update context :source rest)])
 
-(defn unrecognized-char [{:keys [source] :as context}]
-  (let [error (create-error context "Unrecognized character: %c" (first source))]
-    [nil (-> context
-             (update :source rest)
-             (update :errors conj error))]))
+(defn scan-unrecognized-char! [{:keys [source line] :as context}]
+  (error/report-error! line (format "Unrecognized character: %c." (first source)))
+  [nil (update context :source rest)])

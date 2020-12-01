@@ -82,6 +82,12 @@
 (defn literal [token]
   (:literal token))
 
+(defn line [token]
+  (:line token))
+
+(defn matches? [token type & types]
+  ((set (conj types type)) (:type token)))
+
 (defn eof
   ([]
    (eof 1))
